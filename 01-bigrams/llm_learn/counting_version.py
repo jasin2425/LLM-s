@@ -34,6 +34,7 @@ def create_names(nof_names):
         wrd = ""
         while True:
             p = P[indx, :]
+
             indx = torch.multinomial(p, 1, replacement=True, generator=g).item()
             if indx == 0:
                 out.append(wrd)
