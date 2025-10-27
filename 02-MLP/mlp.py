@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 
 
-def create_maps():
+def create_maps(chars):
     chars_map = {ch: indx + 1 for indx, ch in enumerate(chars)}
     chars_map['.'] = 0
     index_map = {indx: ch for ch, indx in chars_map.items()}
@@ -14,9 +14,9 @@ def create_maps():
 # x and y are keeping indexes of chars
 #we will have smth like this
 # X=".ad"   Y="a"
-def create_input_output(nof_input_chars,words):
+def build_dataset(nof_input_chars, names):
     X, Y = [], []
-    for w in words :
+    for w in names :
         w = w + '.'
         single_x = [0] * nof_input_chars  #0 because it is the index o '.'
         for ch in w:
@@ -26,7 +26,19 @@ def create_input_output(nof_input_chars,words):
             # updating input list
             single_x = single_x[1:] + [new_index]
     return torch.tensor(X), torch.tensor(Y)
+def divide_dataset():
+    # dividing dataset into train,test,dev
+    indexes = torch.randperm(len(words))
+    n1 = int(len(words) * 0.8)
+    n2 = int(len(words) * 0.9)
 
+    # from how many letters we want to predict next one
+    nof_letters = 3
+    # Inputs and labels
+    random.shuffle(words)
+    Xtr, Ytr = build_dataset(nof_letters, words[:n1])
+    Xtst, Ytst = build_dataset(nof_letters, words[n1:n2])
+    Xdv, Ydv = build_dataset(nof_letters, words[n2:])
 
 def traing_data(lr):
     indexes = torch.randint(0,Xtr.shape[0],(128,),generator=g)
@@ -51,20 +63,9 @@ words = open('names.txt', 'r').read().splitlines()
 
 chars = sorted(list(set(''.join(words))))
 
-chars_map, index_map = create_maps()
+chars_map, index_map = create_maps(chars)
 
-#dividing dataset into train,test,dev
-indexes=torch.randperm(len(words))
-n1=int(len(words)*0.8)
-n2=int(len(words)*0.9)
 
-# from how many letters we want to predict next one
-nof_letters = 3
-# Inputs and labels
-random.shuffle(words)
-Xtr,Ytr=create_input_output(nof_letters,words[:n1])
-Xtst,Ytst=create_input_output(nof_letters,words[n1:n2])
-Xdv,Ydv=create_input_output(nof_letters,words[n2:])
 # shape_of_location_vecotor
 lv = 10
 g = torch.Generator().manual_seed(2147483647)  # for reproducibility
@@ -139,3 +140,4 @@ prob=counts/counts.sum(1,keepdims=True)
 print(prob.shape)
 loss=-prob[torch.arange(67),Y].log().mean()
 '''
+
