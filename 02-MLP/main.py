@@ -2,6 +2,8 @@ import random
 
 import torch
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
+from sympy.codegen import Print
 
 NOF_LETTERS=3 # from how many letters we want to predict next one
 N_EMBD=10 #dimensions of the C vector
