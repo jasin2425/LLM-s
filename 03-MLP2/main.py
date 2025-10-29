@@ -46,7 +46,9 @@ def train_data(lr,Xtr,Ytr,losses):
     # forward pass
     emb = C[Xtr[indexes]]
     embcat=emb.view(-1,N_EMBD*NOF_LETTERS) #concatenate vectors
-    h = torch.tanh(embcat @ W1 + b1)
+    hpreact=embcat@W1+b1
+    hpreact=bngain*(hpreact-hpreact.mean(0,keepdim=True))/hpreact.std(0,keepdim=True)+bnbias
+    h = torch.tanh(hpreact)
     logits = h @ W2 + b2
     loss = F.cross_entropy(logits, Ytr[indexes])
     # backward pass
@@ -58,6 +60,16 @@ def train_data(lr,Xtr,Ytr,losses):
         p.data -=  lr* p.grad
     #lri.append(lrs[i])
     losses.append(loss.item())
+
+@torch.no_grad()
+#calculating std and meand for batch normalization
+def calc_mean_std():
+    emb=C[Xtrening]
+    embcat=emb.view(-1,NOF_LETTERS*N_EMBD)
+    hpreact=embcat@W1+b1
+    bnmean=hpreact-hpreact.mean(0,keepdim=True)
+    bnstd=(hpreact-hpreact.std(0,keepdim=True))
+    return bnmean,bnstd
 @torch.no_grad()
 def split_loss(split):
     x,y = {
@@ -67,7 +79,9 @@ def split_loss(split):
     }[split]
     emb = C[x]
     embcat=emb.view(emb.shape[0],-1)
-    h = torch.tanh(embcat @ W1 + b1)
+    hpreact = embcat @ W1 + b1
+    hpreact = bngain * (hpreact - bnmean / bnstd) + bnbias
+    h = torch.tanh(hpreact)
     # forward pass
     logits = h @ W2 + b2
     loss = F.cross_entropy(logits, y)
@@ -92,18 +106,12 @@ W1 = torch.randn(N_EMBD * NOF_LETTERS, N_HIDEEN, generator=g)*(5/3)/(NOF_LETTERS
 b1 = torch.randn(N_HIDEEN, generator=g)*0.01
 W2 = torch.randn(N_HIDEEN, len(chars) + 1, generator=g)*0.01
 b2 = torch.randn(len(chars) + 1, generator=g)*0.01
-parameters = [W1, W2, b1, b2, C]
+bngain=torch.ones(1,N_HIDEEN)
+bnbias=torch.zeros(1,N_HIDEEN)
+parameters = [W1, W2, b1, b2, C,bnbias,bngain]
 for p in parameters:
     p.requires_grad = True
 
-'''finding best learing rate
-lre=torch.linspace(-3,0,1000)
-lrs=10**lre
-lri=[]
-train, 2.049363374710083
-val, 2.13407564163208
-test, 2.139523983001709
-'''
 #Training network with decay
 losses=[]
 step_counter=0
@@ -115,7 +123,7 @@ for i in range(15000):
     train_data(0.05,Xtrening,Ytrening,losses)
 for i in range(15000):
     train_data(0.01,Xtrening,Ytrening,losses)
-
+bnmean,bnstd=calc_mean_std()
 split_loss('train')
 split_loss('val')
 split_loss('test')

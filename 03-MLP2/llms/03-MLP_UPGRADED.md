@@ -18,4 +18,16 @@ gain dla tannh = 5/3
 
 NOWE OPTYMALIZACJE:
 1. Batch normalization:
-checmy żeby wejście do tanh było gaussowskie, więc na bazie pracy naukowej odkyrto że trzeba poporstu to wejście gaussowskie 
+checmy żeby wejście do tanh nie było ani bardzo duże ani bardzo małe chemy żeby było w miarę gaussowskie, więc na bazie pracy naukowej odkyrto że trzeba poporstu to wejście przekształcić na rozkład Gaussa.
+Normalizujemy h_preactivation więc hpreact=hpreac-hpreac.mean
+na marginesie czym jest odchylenie standardowe?
+określa ono jak mocno dane są rozproszone od ich średniej, czym większe odchylenie tym większe rozproszenie (jest to pierwiastek z wariancji)
+**dodatkowo** będziemy mnożyć licznik razy bngain oraz dodawać na koniec bnbias które sieć będzie dostosowaywała (one odpowiadają za dostosowanie odchylenia i sredniej)
+
+Problem z Barch normalization:
+Przez nią nasza sieć uczy sie na batchach które mają swoją średnią i odchylenie i to jest fajne do treningu bo dodaje noise itd. ale problem pojawia się kiedy chcemy zrobić sprawdzić działanie naszej sieci nie mając tych batchu tylko na pojedynczych przykłądach
+
+Rozwiązanie:
+po treningu wyliczamy srednia i odchulenie na całej bazie treningowej i zamiast podczas ewaluacji dynamicznie obliczac to hpreact mamy fixed dane
+
+
