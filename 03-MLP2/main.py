@@ -161,4 +161,4 @@ for _ in range(20):
         out.append(indx)
         if indx == 0:
             break
-    print(''.join(index_map[i] for i in (out)))
+    print(''.join(index_map[i] for i in out))

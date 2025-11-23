@@ -36,13 +36,14 @@ def create_maps(chars):
 # like torch.nn.linear
 class Linear:
     def __init__(self, fan_in, fan_out, bias=True):
-        self.weight = torch.randn(fan_in, fan_out, generator=g) * fan_in ** (-0.5)
+        self.weight = torch.randn((fan_in, fan_out), generator=g) * fan_in ** (-0.5)
         self.bias = torch.zeros(fan_out) if bias else None
 
     def __call__(self, x):
+        self.out=x@self.weight
         if self.bias is not None:
-            return x @ self.weight + self.bias
-        return x @ self.weight
+             self.out += self.bias
+        return self.out
 
     def parameters(self):
         return [self.weight] + ([] if self.bias is None else [self.bias])
@@ -62,12 +63,12 @@ class BatchNorm1d:
 
     def __call__(self, x):
         if self.training:
-            xmean = x.mean(0, keepdim=True)
-            xvar = x.var(0, keepdim=True)
+            xmean = x.mean(0, keepdim=True) #batch mean
+            xvar = x.var(0, keepdim=True) #batch variance
         else:
             xmean = self.runningMean
             xvar = self.runningVar
-        xhat = (x - xmean) / (torch.sqrt(xvar ** 2 - self.eps))
+        xhat = (x - xmean) / (torch.sqrt(xvar+ self.eps)) #normalize
         self.out = self.gamma * xhat + self.beta
         if self.training:
             with torch.no_grad():
@@ -103,22 +104,22 @@ def divide_dataset(words):
 
 
 def trainNetwork(Xtr, Ytr, lr):
-    maxSteps = 200000
+    maxSteps = 2000
     lossi = []
     ud = []
     for i in range(maxSteps):
         #getting minibatch
-        indexes = torch.randint(0, len(Xtr[0]), (BATCH_SIZE,), generator=g)
+        indexes = torch.randint(0, Xtr.shape[0], (BATCH_SIZE,), generator=g)
         X_batch = Xtr[indexes]
         Y_batch = Ytr[indexes]
 
         #create array of embeedings
         emb = C[X_batch]
-        X = emb.view(-1, NOF_LETTERS * N_EMBD)
+        emcat = emb.view(-1, NOF_LETTERS * N_EMBD)
         #forward pass
         for layer in layers:
-            X = layer(X)
-        loss = F.cross_entropy(X, Y_batch)
+            emcat = layer(emcat)
+        loss = F.cross_entropy(emcat, Y_batch)
         #backward pass
         for p in parameters:
             p.grad = None
@@ -127,26 +128,56 @@ def trainNetwork(Xtr, Ytr, lr):
             lr = 0.01
         for p in parameters:
             p.data -= lr * p.grad
+@torch.no_grad()
+def split_loss(split):
+    x, y = {
+        'train': (Xtrening, Ytrening),
+        'val': (Xdev, Ydev),
+        'test': (Xtest, Ytest)
+    }[split]
+    emb = C[x]
+    x = emb.view(-1,NOF_LETTERS*N_EMBD)
+    for layer in layers:
+        x=layer(x)
 
-        # track stats
-        if i % 10000 == 0:  # print every once in a while
-            print(f'{i:7d}/{maxSteps:7d}: {loss.item():.4f}')
-        lossi.append(loss.log10().item())
-        with torch.no_grad():
-            ud.append([((lr * p.grad).std() / p.data.std()).log10().item() for p in parameters])
+    loss = F.cross_entropy(x, y)
+
+    print(f'{split}, {loss.item()}')
+
+@torch.no_grad()
+def sampleFromModel(nofSamples):
+    for _ in range(nofSamples):
+        starting=[0]*NOF_LETTERS
+        name=""
+        while True:
+            emb = C[torch.tensor([starting])]
+            x=emb.view(-1,NOF_LETTERS*N_EMBD)
+            for layer in layers:
+                x=layer(x)
+            logits=x
+            probs=F.softmax(logits,dim=1)
+            newindex=torch.multinomial(probs,1).item()
+            name+=index_map[newindex]
+            starting=starting[1:] + [newindex]
+            if newindex == 0:
+                break
+        print(name)
+
+
+
 
 n_embd = 10  #dimensions of character-embedding vectors
 n_hidden = 100  #number of neurons in a hidden layer
+g = torch.Generator().manual_seed(9876543987)
 
 # reading data
 words = open('names.txt', 'r').read().splitlines()
 
 chars = sorted(list(set(''.join(words))))
-vocab_size = len(chars)
+vocab_size = len(chars)+1
 chars_map, index_map = create_maps(chars)
 Xtrening, Ytrening, Xtest, Ytest, Xdev, Ydev = divide_dataset(words)
 InitLR=0.1
-g = torch.Generator().manual_seed(9876543987)
 
 #initzializing network
 C = torch.randn((vocab_size, n_embd), generator=g)
@@ -157,8 +188,10 @@ layers = [
     Linear(n_hidden, n_hidden),BatchNorm1d(n_hidden), Tanh(),
     Linear(n_hidden, n_hidden),BatchNorm1d(n_hidden), Tanh(),
     Linear(n_hidden, n_hidden),BatchNorm1d(n_hidden), Tanh(),
-    Linear(n_hidden, vocab_size),BatchNorm1d(n_hidden)
+    Linear(n_hidden, vocab_size),BatchNorm1d(vocab_size)
 ]
+
+#initzialize data
 with torch.no_grad():
     layers[-1].gamma *= 0.1  #make logits smaller and model less confident
     for i in layers[:-1]:
@@ -170,4 +203,14 @@ for p in parameters:
 
 #training network
 trainNetwork(Xtrening,Ytrening,InitLR)
+
+for layer in layers:
+  layer.training = False
+#calculate loss
+split_loss('train')
+split_loss('val')
+split_loss('test')
+
+sampleFromModel(20)
+
 
