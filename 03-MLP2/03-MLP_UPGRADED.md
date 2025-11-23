@@ -43,8 +43,12 @@ Przez to że my zmieniamy nasze parametry na podstawie mini-batchy to pojawia si
 
 
 niestety batch normalization powoduje dużo bugów więc teraz raczej się uzywa layer normalization lub group normalization
+ale bez batch normalization i innych tego typu regulyzatorow musimy bardzo dokładnie sprawdzać czy gradienty nie rozjerzadją się za bardzo ani nie zwężają. chcemy ładnego łuku :)
 
 
+wykresy na które warto spojrzeć ( sprawdzić czy nie ma żadnych anomalii w naszej sieći)
+-Histogramy Aktywacji (forward pass) - procent nasycenia czyli 
+-Histogramy Gradientów (Backward Pass)
 
 Notatki nieuporządkowane
 **Problemy z 02-MLP - Słaba inicjalizacja :(
