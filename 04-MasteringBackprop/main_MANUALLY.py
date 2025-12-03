@@ -4,11 +4,11 @@ import torch
 import torch.nn.functional as F
 
 NOF_LETTERS = 3  # from how many letters we want to predict next one
-N_EMBD = 10  #dimensions of the C vector
-N_HIDEEN = 300  #number of neurons in hidden layer
+N_EMBD = 10  # dimensions of the C vector
+N_HIDEEN = 300  # number of neurons in hidden layer
 BATCH_SIZE = 128  # number of samples in one train
-
-
+MAXSTEPS=2000
+g = torch.Generator().manual_seed(2147483647)
 def create_maps(chars):
     chars_map = {ch: indx + 1 for indx, ch in enumerate(chars)}
     chars_map['.'] = 0
@@ -16,14 +16,18 @@ def create_maps(chars):
     return chars_map, index_map
 
 
-# x and y are keeping indexes of chars
-#we will have smth like this
-# X=".ad", Y="a"
+def cmp(s, dt, t):
+    ex = torch.all(dt == t.grad).item()
+    app = torch.allclose(dt, t.grad)
+    maxdiff = (dt - t.grad).abs().max().item()
+    print(f'{s:15s} | exact: {str(ex):5s} | approximate: {str(app):5s} | maxdiff: {maxdiff}')
+
+
 def build_dataset(nof_input_chars, names):
     X, Y = [], []
     for w in names:
         w = w + '.'
-        single_x = [0] * nof_input_chars  #0 because it is the index o '.'
+        single_x = [0] * nof_input_chars  # 0 because it is the index o '.'
         for ch in w:
             new_index = chars_map[ch]
             Y.append(new_index)
@@ -46,43 +50,138 @@ def divide_dataset(words):
     return Xtr, Ytr, Xtst, Ytst, Xdv, Ydv
 
 
-def train_data(lr, Xtr, Ytr, losses,bnmean_running,bnstd_running):
-    indexes = torch.randint(0, Xtr.shape[0], (BATCH_SIZE,), generator=g)
-    # forward pass
-    emb = C[Xtr[indexes]]
-    embcat = emb.view(-1, N_EMBD * NOF_LETTERS)  #concatenate vectors
-    hpreact = embcat @ W1 + b1
-    #batch normalization
-    bnmeani=hpreact.mean(0,keepdim=True)
-    bnstdi=hpreact.std(0,keepdim=True)
-    hpreact = bngain * (hpreact - bnmeani) / bnstdi + bnbias #we normalize and the model is adjusting it for the best output
+def train_data(lr, Xtr, Ytr):
     with torch.no_grad():
-        bnmean_running=bnmean_running*0.999+0.001*bnmeani
-        bnstd_running=bnstd_running*0.999+0.001*bnstdi
+        for k in range(MAXSTEPS):
+            indexes = torch.randint(0, Xtr.shape[0], (BATCH_SIZE,), generator=g)
+            x=Xtr[indexes]
+            y=Ytr[indexes]
+            n=BATCH_SIZE
+            # forward pass for manual backprop
+            emb = C[x]
+            embcat = emb.view(-1, N_EMBD * NOF_LETTERS)  # concatenate vectors
+            hprebn = embcat @ W1 + b1
+            # batch normalization
+            bnmeani = 1/n*hprebn.sum(0,keepdim=True)
+            bndiff=hprebn-bnmeani
+            bndiff2=bndiff**2
+            bnvar= 1 / (n-1) *   bndiff2.sum(0, keepdim=True) #formula for variance
+            bnvar_inv=(bnvar+1e-5)**-0.5
+            bnraw=bndiff*bnvar_inv
+            hpreact = bngain * bnraw + bnbias  # we normalize andd the model is adjusting it for the best output
+            h=torch.tanh(hpreact)
+            logits = h @ W2 + b2
+            # #calulate loss manual
+            # #softmax
+            # logit_maxes=logits.max(1,keepdim=True).values
+            # norm_logits=logits-logit_maxes
+            # counts = norm_logits.exp()
+            # counts_sum=counts.sum(1,keepdim=True)
+            # counts_sum_inv=counts_sum**-1
+            # probs=counts*counts_sum_inv
+            # #negative log loss
+            # logprobs=probs.log()
+            loss=F.cross_entropy(logits,y)
 
-    h = torch.tanh(hpreact)
-    logits = h @ W2 + b2
-    loss = F.cross_entropy(logits, Ytr[indexes])
-    # backward pass
-    for p in parameters:
-        p.grad = None
-    loss.backward()
+            for p in parameters:
+                p.grad = None
+            # for t in [logprobs, probs, counts, counts_sum, counts_sum_inv,
+            #           norm_logits, logit_maxes, logits, h, hpreact, bnraw ,
+            #           bnvar_inv, bnvar, bndiff2, bndiff, hprebn, bnmeani,
+            #           embcat, emb]:
+            #     t.retain_grad()
+            #loss.backward()
 
-    for p in parameters:
-        p.data -= lr * p.grad
-    #lri.append(lrs[i])
-    losses.append(loss.item())
-    return bnmean_running,bnstd_running
-#
-# @torch.no_grad()
-# #calculating std and meand for batch normalization
-# def calc_mean_std():
-#     emb = C[Xtrening]
-#     embcat = emb.view(-1, NOF_LETTERS * N_EMBD)
-#     hpreact = embcat @ W1 + b1
-#     bnmean = hpreact - hpreact.mean(0, keepdim=True)
-#     bnstd = (hpreact - hpreact.std(0, keepdim=True))
-#     return bnmean, bnstd
+            # dlogprobs = torch.zeros_like(logprobs)
+            # dlogprobs[range(n),y]=-1.0/len(y)
+            #
+            # dprobs = dlogprobs * 1 / probs
+            # dcounts_sum_inv = (dprobs * counts).sum(1,
+            #                                         keepdim=True)  # bc we broadcast counts_sum_inf we create 27 nodes so we should sum the gradients when backpropagating
+            # dcounts_sum = dcounts_sum_inv * (-counts_sum ** -2)
+            # dcounts = counts_sum_inv * dprobs + torch.ones_like(counts) * dcounts_sum
+            # dnorm_logits = dcounts * norm_logits.exp()
+            # dlogit_maxes = (-1.0 * dnorm_logits).sum(1, keepdim=True)
+            #
+            # max_indices = logits.max(1).indices
+            # pom = F.one_hot(max_indices, num_classes=logits.shape[1])
+            # dlogits = dnorm_logits + dlogit_maxes * pom
+            #shorter version dloss/dlogits
+            dlogits = F.softmax(logits)
+            dlogits[range(n), y] -= 1
+            dlogits *= 1 / n
+            dh = dlogits @ W2.T
+            dW2 = h.T @ dlogits
+            db2 = dlogits.sum(0)
+
+            dhpreact = (1.0 - h * h) * dh
+            dbngain = (dhpreact * bnraw).sum(0, keepdim=True)
+            #dbnraw = (dhpreact * bngain)
+            dbnbias = (dhpreact).sum(0, keepdim=True)
+            # dbnvar_inv = (bndiff * dbnraw).sum(0, keepdim=True)
+            # dbnvar = dbnvar_inv * -0.5 * (bnvar + 1e-5) ** -1.5
+            # dbndiff2 = dbnvar * torch.ones_like(bndiff) * 1 / (n - 1)
+            # dbndiff = dbndiff2 * 2 * bndiff + dbnraw * bnvar_inv
+            # dbnmeani = (dbndiff * -1).sum(0, keepdim=True)
+            #shorter version derivative dloss/dhprebn
+            dhprebn = bngain * bnvar_inv / n * (
+                        n * dhpreact - dhpreact.sum(0) - n / (n - 1) * bnraw * (dhpreact * bnraw).sum(0))
+            dembcat = dhprebn @ W1.T
+            dW1 = embcat.T @ dhprebn
+            db1 = dhprebn.sum(0)
+            demb = dembcat.view(emb.shape)
+            dC = torch.zeros_like(C)
+            for i in range(x.shape[0]):
+                for j in range(x.shape[1]):
+                    cindex = x[i, j]
+                    dC[cindex] += demb[i, j]
+            # cmp('logprobs', dlogprobs, logprobs)
+            # cmp('probs', dprobs, probs)
+            # cmp('counts_sum_inv', dcounts_sum_inv, counts_sum_inv)
+            # cmp('counts_sum', dcounts_sum, counts_sum)
+            # cmp('counts', dcounts, counts)
+            # cmp('norm_logits', dnorm_logits, norm_logits)
+            # cmp('logit_maxes', dlogit_maxes, logit_maxes)
+            # cmp('logits', dlogits, logits)
+            # cmp('h', dh, h)
+            # cmp('W2', dW2, W2)
+            # cmp('b2', db2, b2)
+            # cmp('hpreact', dhpreact, hpreact)
+            # cmp('bngain', dbngain, bngain)
+            # cmp('bnbias', dbnbias, bnbias)
+            # cmp('bnraw', dbnraw, bnraw)
+            #
+            # cmp('bnvar_inv', dbnvar_inv, bnvar_inv)
+            # cmp('bnvar', dbnvar, bnvar)
+            # cmp('bndiff2', dbndiff2, bndiff2)
+            # cmp('bndiff', dbndiff, bndiff)
+            # cmp('bnmeani', dbnmeani, bnmeani)
+            # cmp('hprebn', dhprebn, hprebn)
+            # cmp('embcat', dembcat, embcat)
+            # cmp('W1', dW1, W1)
+            # cmp('b1', db1, b1)
+            # cmp('emb', demb, emb)
+            # cmp('C', dC, C)
+            # # backward pass
+            # for p in parameters:
+            #     p-=p.grad*lr
+            lr = 0.1 if k < 100000 else 0.01
+            grads=[dW1, dW2, db1, db2, dC, dbnbias, dbngain]
+            for p,gradient in zip(parameters,grads):
+                p-=gradient*lr
+            if k % 100 == 0:
+                print(f'{k}/{MAXSTEPS}: {loss.item():.4f}')
+
+
+@torch.no_grad()
+#calculating std and meand for batch normalization
+def calc_mean_std():
+    emb = C[Xtrening]
+    embcat = emb.view(-1, NOF_LETTERS * N_EMBD)
+    hpreact = embcat @ W1 + b1
+    bnmean = hpreact.mean(0, keepdim=True)
+    bnvar = hpreact.var(0, keepdim=True, unbiased=True)
+    return bnmean, bnvar
 
 
 @torch.no_grad()
@@ -95,7 +194,7 @@ def split_loss(split):
     emb = C[x]
     embcat = emb.view(emb.shape[0], -1)
     hpreact = embcat @ W1 + b1
-    hpreact = bngain * ((hpreact - bnmean_running) / bnstd_running) + bnbias
+    hpreact = bngain * (hpreact - bnmean) * (bnvar + 1e-5) ** -0.5 + bnbias
     h = torch.tanh(hpreact)
     # forward pass
     logits = h @ W2 + b2
@@ -103,47 +202,39 @@ def split_loss(split):
     print(f'{split}, {loss.item()}')
 
 
+#split_loss('train')
+#split_loss('val')
 # reading data
 words = open('names.txt', 'r').read().splitlines()
-
 chars = sorted(list(set(''.join(words))))
-
 chars_map, index_map = create_maps(chars)
-
 Xtrening, Ytrening, Xtest, Ytest, Xdev, Ydev = divide_dataset(words)
 
 # INPUT LAYER
-# embedding matrix (every letter has its 'location')
-# For every letter group emb has their 'location' so...
-# shape of this is [NOF_LETTERS, num_of_previous_ltters, shape_of_location_vector)
-g = torch.Generator().manual_seed(2147483647)
-C = torch.randn(len(chars) + 1, N_EMBD)  #embeding matrix
-W1 = torch.randn(N_EMBD * NOF_LETTERS, N_HIDEEN, generator=g) * (5 / 3) / (NOF_LETTERS * N_EMBD) ** 0.5 #normal random + kaiming init
-b1 = torch.randn(N_HIDEEN, generator=g) * 0.01
-W2 = torch.randn(N_HIDEEN, len(chars) + 1, generator=g) * 0.01
-b2 = torch.randn(len(chars) + 1, generator=g) * 0.01
-bngain = torch.ones(1, N_HIDEEN)
-bnbias = torch.zeros(1, N_HIDEEN)
-bnmean_running=torch.zeros(1,N_HIDEEN)
-bnstd_running=torch.ones(1,N_HIDEEN)
+# initzialization of paremetrs:
+
+C = torch.randn(len(chars) + 1, N_EMBD)  # embeding matrix
+# layer 1:
+W1 = torch.randn(N_EMBD * NOF_LETTERS, N_HIDEEN, generator=g) * (5 / 3) / (
+        NOF_LETTERS * N_EMBD) ** 0.5  # normal random + kaiming init
+b1 = torch.randn(N_HIDEEN, generator=g) * 0.1
+# layer 2:
+W2 = torch.randn(N_HIDEEN, len(chars) + 1, generator=g) * 0.1
+b2 = torch.randn(len(chars) + 1, generator=g) * 0.1
+# batchnorm layer doesn't zero for easier backprop debbuging:
+bngain = torch.randn((1, N_HIDEEN))*0.1 + 1.0
+bnbias = torch.randn((1, N_HIDEEN))*0.1
+
 parameters = [W1, W2, b1, b2, C, bnbias, bngain]
 for p in parameters:
     p.requires_grad = True
 
-#Training network with decay
-losses = []
-step_counter = 0
-for i in range(20000):
-    bnmean_running,bnstd_running= train_data(0.15, Xtrening, Ytrening, losses,bnmean_running, bnstd_running)
-for i in range(15000):
-    bnmean_running,bnstd_running= train_data(0.1, Xtrening, Ytrening, losses,bnmean_running,bnstd_running)
-for i in range(15000):
-    bnmean_running,bnstd_running= train_data(0.05, Xtrening, Ytrening, losses,bnmean_running,bnstd_running)
-for i in range(15000):
-    bnmean_running,bnstd_running= train_data(0.01, Xtrening, Ytrening, losses,bnmean_running,bnstd_running)
+# Training network
+train_data(0.1, Xtrening, Ytrening)
+bnmean,bnvar=calc_mean_std()
 split_loss('train')
 split_loss('val')
-split_loss('test')
+
 #SAMPLING FROM MODEL
 for _ in range(20):
     out = []
@@ -151,7 +242,7 @@ for _ in range(20):
     while True:
         emb = C[torch.tensor(context)]
         hpreact=emb.view(-1,N_EMBD*NOF_LETTERS)@W1+b1
-        hpreact=bngain * ((hpreact - bnmean_running) / bnstd_running) + bnbias
+        hpreact = bngain * (hpreact - bnmean) * (bnvar + 1e-5) ** -0.5 + bnbias
         h = torch.tanh(hpreact)
         logits = h @ W2 + b2
 
