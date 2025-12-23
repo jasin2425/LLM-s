@@ -49,7 +49,9 @@ ale bez batch normalization i innych tego typu regulyzatorow musimy bardzo dokł
 wykresy na które warto spojrzeć ( sprawdzić czy nie ma żadnych anomalii w naszej sieći)
 -Histogramy Aktywacji (forward pass) - procent nasycenia czyli 
 -Histogramy Gradientów (Backward Pass)
-
+- Update-to-Data Ratio (Stosunek aktualizacji do wartości wag)
+To jest prawdopodobnie najważniejszy wykres do debugowania Learning Rate (LR). Jeśli stosunek jest za niski (np. $10^{-5}$) -> sieć uczy się wieki (zbyt ostrożnie).Jeśli stosunek jest za wysoki (np. $10^{-1}$ lub więcej) -> sieć "skacze" i jest niestabilna.Złoty środek: Karpathy celuje w okolice $10^{-3}$ (czyli na wykresie logarytmicznym wartość -3).
+- Standard Deviation of Activations (Odchylenie standardowe aktywacji warstwa po warstwie) Wykres pokazujący, czy sygnał "gaśnie" czy "wybucha" w miarę przechodzenia przez kolejne warstwy sieci.O co chodzi: Patrzymy na x.std() na wyjściu każdej warstwy.Dlaczego to ważne:Idealnie chcemy, aby odchylenie standardowe było stabilne przez całą sieć (dlatego używamy Gain $5/3$ dla Tanh).Jeśli std spada w kolejnych warstwach -> problem zanikającego gradientu.Jeśli std rośnie -> problem eksplodującego gradientu.Wpływ Batch Norm: Jeśli masz dobrze zaimplementowany Batch Norm, ten wykres będzie dość nudny (płaski), co jest dobrą wiadomością – BN wymusza, żeby std było stabilne. Ale bez BN (lub przy złej inicjalizacji) zobaczyłbyś drastyczny spadek/wzrost.
 Notatki nieuporządkowane
 **Problemy z 02-MLP - Słaba inicjalizacja :(
 1. na początku inicjalizacji loss wynosi około 27.9 a powinien w teori wynosić 3.296 ( bo to jest log(-1/27.0)), spowodowane jest to tym że logits po pierwszej iteracji są bardzo rózne od -30 do 30
