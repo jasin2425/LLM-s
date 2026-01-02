@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 # consts
 NOF_LETTERS = 8  # from how many letters we want to predict next one
-N_EMBD = 10  # dimensions of the C vector
+N_EMBD = 24  # dimensions of the C vector
 N_HIDEEN = 300  # number of neurons in hidden layer
 BATCH_SIZE = 128  # number of samples in one train
 g = torch.Generator().manual_seed(9876543987)
@@ -65,8 +65,12 @@ class BatchNorm1d:
 
     def __call__(self, x):
         if self.training:
-            xmean = x.mean(0, keepdim=True)  # batch mean
-            xvar = x.var(0, keepdim=True)  # batch variance
+            if x.ndim==2:
+                dim=0
+            elif x.ndim==3: #3 dimension of x
+                dim=(0,1)
+            xmean = x.mean(dim, keepdim=True)  # batch mean (in wn we want to it for whole batch not every pair)
+            xvar = x.var(dim, keepdim=True)  # batch variance
         else:
             xmean = self.runningMean
             xvar = self.runningVar
@@ -99,11 +103,17 @@ class Embedding:
         return self.out
     def parameters(self):
         return [self.weights]
-#like nn.flatten
-class Flatten:
+class FlattenWaveNet:
+    def __init__(self,n):
+        self.n=n #number of letters that we want to merge ( WAVENET )
     def __call__(self, X):
-        #concatinate from size n,nof_letters,n_emb to n,nof_leters*n_emb
-        self.out=X.view(X.shape[0],-1)
+        #batch size, nofletters,dimensions
+        B,L,D=X.shape
+        X=X.view(B,L//self.n,D*self.n)
+        #for the last pair (last layer)
+        if X.shape[1]==1:
+            X=X.squeeze(1)
+        self.out=X
         return self.out
     def parameters(self):
         return []
@@ -155,10 +165,9 @@ def trainNetwork(Xtr, Ytr, lr):
             lr = 0.01
         for p in parameters:
             p.data -= lr * p.grad
-        if i%1000==0:
 
         lossi.append(torch.log10(loss))
-    plt.plot(torch.tensor(lossi).view(-1, 100).mean(1))
+    plt.plot(torch.tensor(lossi).view(-1,200).mean(1))
     plt.show()
 
 @torch.no_grad()
@@ -207,10 +216,12 @@ InitLR = 0.1
 # INITZIALIZING NETWORK
 model =Sequential( [
     Embedding(vocab_size,N_EMBD),
-    Flatten(),
-    Linear(N_EMBD * NOF_LETTERS, N_HIDEEN), BatchNorm1d(N_HIDEEN), Tanh(),
-    Linear(N_HIDEEN, N_HIDEEN), BatchNorm1d(N_HIDEEN), Tanh(),
-    Linear(N_HIDEEN, vocab_size)
+    FlattenWaveNet(2),
+    Linear(N_EMBD * 2, N_HIDEEN), BatchNorm1d(N_HIDEEN), Tanh(),
+    FlattenWaveNet(2),
+    Linear(N_HIDEEN*2, N_HIDEEN), BatchNorm1d(N_HIDEEN), Tanh(),
+    FlattenWaveNet(2),
+    Linear(N_HIDEEN*2, vocab_size)
 ])
 
 # initzialize data
